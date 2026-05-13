@@ -1,3 +1,4 @@
+// index.js
 const { 
     default: makeWASocket, 
     useMultiFileAuthState, 
@@ -6,6 +7,7 @@ const {
 const { Boom } = require("@hapi/boom");
 const P = require("pino");
 const fs = require("fs");
+const qrcode = require("qrcode-terminal"); // Loads the manual QR generator module
 const config = require("./config");
 
 // Initialize local JSON system storage file
@@ -28,7 +30,7 @@ async function startBot() {
 
     const sock = makeWASocket({
         auth: state,
-        printQRInTerminal: true, // This prints the sync code to your Render dashboard logs
+        printQRInTerminal: false, // Turned off to prevent the deprecation crash loop
         logger: P({ level: "silent" }),
         browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
@@ -37,7 +39,16 @@ async function startBot() {
 
     // Watch real-time server connectivity states
     sock.ev.on("connection.update", (update) => {
-        const { connection, lastDisconnect } = update;
+        const { connection, lastDisconnect, qr } = update;
+
+        // If a QR code token is issued by the server, render it cleanly in the console logs
+        if (qr) {
+            console.log("\n==================================================");
+            console.log("📷 SCAN THIS QR CODE WITH YOUR WHATSAPP LINKED DEVICES:");
+            console.log("==================================================\n");
+            qrcode.generate(qr, { small: true });
+        }
+
         if (connection === "close") {
             const shouldReconnect = (lastDisconnect?.error instanceof Boom) 
                 ? lastDisconnect.error.output?.statusCode !== DisconnectReason.loggedOut 
