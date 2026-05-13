@@ -7,10 +7,20 @@ const {
 const { Boom } = require("@hapi/boom");
 const P = require("pino");
 const fs = require("fs");
-const qrcode = require("qrcode-terminal"); // Loads the manual QR generator module
+const qrcode = require("qrcode-terminal");
+const http = require("http");
 const config = require("./config");
 
-// Initialize local JSON system storage file
+// ---- FIX 2: RENDER LIVE WEB PORT BINDING ----
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("Bot active\n");
+}).listen(PORT, () => {
+    console.log(`[RENDER] Port validation running on ${PORT}`);
+});
+// ---------------------------------------------
+
 const DB_FILE = "./database.json";
 if (!fs.existsSync(DB_FILE)) {
     fs.writeFileSync(DB_FILE, JSON.stringify({ users: {} }, null, 2));
@@ -25,23 +35,21 @@ function saveDatabase(data) {
 }
 
 async function startBot() {
-    // Manages session encryption tokens locally inside the environment
     const { state, saveCreds } = await useMultiFileAuthState("auth_session");
 
     const sock = makeWASocket({
         auth: state,
-        printQRInTerminal: false, // Turned off to prevent the deprecation crash loop
+        printQRInTerminal: false, // FIX 1: Prevent deprecation crash loops
         logger: P({ level: "silent" }),
         browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
 
     sock.ev.on("creds.update", saveCreds);
 
-    // Watch real-time server connectivity states
     sock.ev.on("connection.update", (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        // If a QR code token is issued by the server, render it cleanly in the console logs
+        // FIX 1: Generate safe visual QR blocks manually in logs
         if (qr) {
             console.log("\n==================================================");
             console.log("📷 SCAN THIS QR CODE WITH YOUR WHATSAPP LINKED DEVICES:");
@@ -53,7 +61,7 @@ async function startBot() {
             const shouldReconnect = (lastDisconnect?.error instanceof Boom) 
                 ? lastDisconnect.error.output?.statusCode !== DisconnectReason.loggedOut 
                 : true;
-            console.log("Connection lost. Reconnecting automatic loop: ", shouldReconnect);
+            console.log("Reconnecting automatic loop status: ", shouldReconnect);
             if (shouldReconnect) {
                 startBot();
             }
@@ -62,7 +70,6 @@ async function startBot() {
         }
     });
 
-    // Inbound text scanner evaluation loop
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
         try {
             if (type !== "notify") return;
@@ -81,7 +88,6 @@ async function startBot() {
             const args = body.slice(config.prefix.length).trim().split(/ +/);
             const command = args.shift().toLowerCase();
 
-            // Handle database registration profiles
             let db = getDatabase();
             if (!db.users[sender]) {
                 db.users[sender] = { wallet: 15991, bank: 0, lastDaily: 0 };
@@ -92,7 +98,6 @@ async function startBot() {
                 await sock.sendMessage(from, { text: text }, { quoted: msg });
             };
 
-            // ---- EXECUTE SYSTEMS ----
             if (command === "bal" || command === "balance") {
                 const balLayout = `
 
@@ -101,9 +106,7 @@ async function startBot() {
 | 💵 Wallet: ${config.currencySymbol}${user.wallet.toLocaleString()}
 
 | 🏛️ Wistoria: ${config.currencySymbol}${user.bank.toLocaleString()}
-|
 | 💎 Assets: ${config.currencySymbol}${(user.wallet + user.bank).toLocaleString()}
-
 |
 | 💠 Wistoria
 `;
@@ -112,7 +115,7 @@ async function startBot() {
 
             else if (command === "daily") {
                 const now = Date.now();
-                const cooldown = 24 * 60 * 60 * 1000; // 24-hour lock
+                const cooldown = 24 * 60 * 60 * 1000;
 
                 if (now - user.lastDaily < cooldown) {
                     return reply("⚠️ Daily bonus already claimed for today!");
@@ -121,7 +124,7 @@ async function startBot() {
                 user.wallet += config.dailyPayout;
                 user.lastDaily = now;
                 saveDatabase(db);
-                await reply(`💰 DAILY CREDITED\n+${config.currencySymbol}${config.dailyPayout.toLocaleString()} added to wallet\n\n🔥 streak: Custom\n🏛️ wistoria economy`);
+                await reply(`💰 DAILY CREDITED\n+${config.currencySymbol}${config.dailyPayout.toLocaleString()} added to wallet\n\n🏛️ wistoria economy`);
             }
 
             else if (command === "kick") {
@@ -134,12 +137,12 @@ async function startBot() {
                     return reply("Failed to kick user(s): not-authorized");
                 }
 
-                let target = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+                let target = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?[0];
                 if (!target && args[0]) {
                     target = `${args[0].replace(/[^0-9]/g, "")}@s.whatsapp.net`;
                 }
 
-                if (!target) return reply("Tag a user or input their absolute mobile number.");
+                if (!target) return reply("Tag a user or input their phone number.");
                 
                 await sock.groupParticipantsUpdate(from, [target], "remove");
                 await reply("User removed successfully.");
